@@ -1,0 +1,365 @@
+---
+title: "| OPERATIONS MANUAL\n| \n| Strategus Data Model\n| \n| \n"
+author: "Marc A. Suchard"
+fontsize: 12pt
+geometry: margin=1in
+always_allow_html: true
+output:
+  bookdown::html_document2:
+    df_print: paged
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    number_sections: yes
+    number_tables: yes
+    highlight: zenburn
+    css: "style.css"
+  bookdown::pdf_document2:
+    keep_tex: yes
+    latex_engine: xelatex
+    md_extensions: +raw_attribute
+    number_sections: yes
+    # citation_package: natbib
+    includes:
+      before_body: title.tex
+header-includes:
+- \usepackage[numbers,sort&compress]{natbib}
+- \usepackage{booktabs}
+- \usepackage{longtable}
+- \usepackage{array}
+- \usepackage{multirow}
+- \usepackage{wrapfig}
+- \usepackage{float}
+- \usepackage{colortbl}
+- \usepackage{pdflscape}
+- \usepackage{tabu}
+- \usepackage{threeparttable}
+- \usepackage{threeparttablex}
+- \usepackage[normalem]{ulem}
+- \usepackage{makecell}
+- \usepackage{caption}
+- \usepackage{rotating}
+- \usepackage{multirow}
+- \usepackage{mwe,tikz}
+- \usepackage[percent]{overpic}
+- \usepackage{enumitem}
+- \usepackage{hyperref}
+- \newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
+- \newcommand{\footerDate}{`r params$date`}
+- \input{header.tex}
+longtable: yes
+mainfont: Arial
+params:
+  date: '2023-06-01'
+  version: 0.0.99
+subtitle: 'Version: `r params$version`'
+link-citations: true
+csl: bmj.csl
+---
+
+```{r setup, include=FALSE}
+def.chunk.hook  <- knitr::knit_hooks$get("chunk")
+knitr::knit_hooks$set(chunk = function(x, options) {
+  x <- def.chunk.hook(x, options)
+  paste0("\n \\", "footnotesize","\n\n", x, "\n\n \\normalsize")
+})
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(dplyr)
+library(kableExtra)
+library(DT)
+
+latex_table_font_size <- 8
+```
+
+# Access and schema
+
+This document describes the data models for `Strategus` modules and some instructions on how to access results in these models.
+We hold results on the OHDSI public database server `shinydb` that runs `postgresql`.
+You can install the `postgresql` JDBC drivers; this only needs to be done once.
+
+It is recommend to specify the environmental variable `DATABASECONNECT_JAR_FOLDER=<folder-of-your-choice>` in `.Renviron` located in the user's home directory.
+In the example below, however, we set the environmental variable manually in `R` to make this document more self-contained.
+
+```{r db, eval=FALSE}
+Sys.setenv(DATABASECONNECTOR_JAR_FOLDER = getwd())
+DatabaseConnector::downloadJdbcDrivers(dbms = "postgresql")
+```
+
+and set-up connection details, in this case using `keyring` to hide usernames and passwords for security`
+
+```{r connect, eval=TRUE}
+# OHDSI shinydb read-only credentials
+connectionDetails <- DatabaseConnector::createConnectionDetails(
+  dbms = "postgresql",
+  server = keyring::key_get("sosTutorialServer"),
+  user = keyring::key_get("sosTutorialUser"),
+  password = keyring::key_get("sosTutorialPassword"))
+```
+
+Table \@ref(tab:schema) provides the `schema` names for SOS Challenge results.
+
+```{r schema, echo=FALSE, warning=FALSE}
+schema <- readr::read_delim(col_names = FALSE, delim = ";", trim_ws = TRUE, 
+                            show_col_types = FALSE,file = "
+  Fluoroquinolone and aortic aneurysms ; quinoloneaa
+  Intravitreal anti-VEGF and kidney failure ; antivegfkf
+")
+
+tab <- kbl(schema, col.names = c("SOS Challenge study", "schema"),
+           linesep = "", booktabs = TRUE,
+           caption = "SOS Challenge study schema")
+
+if (knitr::is_latex_output()) {
+  tab %>% kable_styling(latex_options = "striped",
+                        font_size = latex_table_font_size)
+} else {
+  tab %>% kable_styling(bootstrap_options = "striped")
+}
+```
+
+# Data models
+
+```{r echo=FALSE}
+printDataModelSpecification <- function(filename, level = "###") {
+
+  specifications <- readr::read_csv(filename, show_col_types = FALSE) 
+  
+  if ("optional" %in% names(specifications)) {
+    specifications <- specifications %>% filter(optional == "No")
+  }
+  
+  tables <- split(specifications, specifications$table_name)
+  
+  for (table in tables) {
+    header <- sprintf("%s Table %s", level, table$table_name[1])
+    
+    table <- table %>%
+      select(Field = .data$column_name, Type = .data$data_type, Key = .data$primary_key
+             # , Description = .data$description
+      ) %>%
+      kbl(linesep = "", booktabs = TRUE, longtable = TRUE)
+    
+    if (knitr::is_latex_output()) {
+      writeLines("")
+      writeLines(header)
+      
+      writeLines(table %>%
+                   kable_styling(latex_options = "striped", font_size = latex_table_font_size) %>%
+                   column_spec(1, width = "10em") %>%
+                   column_spec(2, width = "5em") %>%
+                   column_spec(3, width = "3em") %>%
+                   column_spec(4, width = "16em"))
+    } else if (knitr::is_html_output()) {
+      writeLines("")
+      writeLines(header)
+      
+      writeLines(table %>%
+                   kable_styling(bootstrap_options = "striped"))
+    }
+  }
+}
+```
+
+```{r echo=FALSE, results="asis", warning=FALSE, cache=TRUE}
+modules <- readr::read_delim(col_names = TRUE, delim = ";", trim_ws = TRUE, 
+                            show_col_types = FALSE,file = "
+  name ; prefix ; url
+  Characterization ; c ; https://raw.githubusercontent.com/OHDSI/Characterization/main/inst/settings/resultsDataModelSpecification.csv
+  CohortDiagnostics ; cd ; https://raw.githubusercontent.com/OHDSI/CohortDiagnostics/main/inst/settings/resultsDataModelSpecification.csv
+  CohortGenerator; gc ; https://raw.githubusercontent.com/OHDSI/CohortGeneratorModule/main/resultsDataModelSpecification.csv
+  CohortIncidence ; ci; https://raw.githubusercontent.com/OHDSI/CohortIncidenceModule/master/resultsDataModelSpecification.csv
+  CohortMethod ; ; https://raw.githubusercontent.com/OHDSI/CohortMethod/main/inst/csv/resultsDataModelSpecification.csv
+  PatientLevelPrediction ; plp ; https://raw.githubusercontent.com/OHDSI/PatientLevelPrediction/main/inst/settings/resultsDataModelSpecification.csv
+")
+
+for (i in 1:nrow(modules)) {
+  cat("## ", modules[i,]$name)
+  printDataModelSpecification(filename = modules[i,]$url,
+                              level = "###")
+}
+```
+
+## Fields with minimum values
+
+Some fields contain patient counts or fractions that are easily converted to patient counts.
+To prevent identifiability, these fields are subject to a minimum value.
+When the value falls below this minimum, it is replaced with the negative value of the minimum.
+For example, if the minimum subject count is 5, and the actual count is 2, the value stored in the data model will be -5, which could be represented as '\<5' to the user.
+Note that the value 0 is permissible, as it identifies no persons.
+
+# Retrieving database meta-data
+
+We will use the `Hades` packages `DatabaseConnector` and `SqlRender` to query the results tables directly in `R`.  
+Many `join`s and column-`select` can be done either on the server-side (`postgresql`) or client-side (`R`).
+We prefer the server-side when accessing large tables.
+On the client-side, `dplyr` is effective.
+
+Here is an example of a basic query to `database_meta_data` to return data-source names and abbreviations (with client-side `select`):
+
+```{r, metaData, message=FALSE, cache=TRUE}
+schema <- "quinoloneaa"
+
+connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
+
+sql <- SqlRender::render(sql = "
+  SELECT * FROM @schema.database_meta_data",
+  schema = schema) # parameterized
+                        
+metaData <- DatabaseConnector::querySql(connection = connection,
+                                        sql = sql,
+                                        snakeCaseToCamelCase = TRUE)
+
+DatabaseConnector::disconnect(connection)
+
+names(metaData)
+
+library(dplyr)
+databaseName <- metaData %>% select(cdmSourceAbbreviation, databaseId)
+databaseName
+```
+
+Now is a good time to (manually) change the abbreviations in `databaseName` to consistent, similar-length, reader-friendly choices for our manuscript(s).
+
+```{r}
+databaseName$shortDatabaseName <- c("JMDC", "MDCD", "Ausom", "NHIS", "OptumDOD", 
+                                    "VA", "OptumEHR", "CCAE", "PhM", "TMU")
+```
+
+Likewise, we retrieve reader-friendly cohort names.
+Note that the following codes does not return negative control cohort names; these are not (?) currently stored in the results-set.
+
+```{r, cohortNames, message=FALSE, cache=TRUE}
+connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
+sql <- SqlRender::render(sql = "
+  SELECT DISTINCT cohort_id, cohort_name FROM @schema.cg_cohort_generation",
+  schema = schema)
+                        
+cohortName <- DatabaseConnector::querySql(connection = connection,
+                                            sql = sql,
+                                            snakeCaseToCamelCase = TRUE) 
+
+DatabaseConnector::disconnect(connection)
+```
+
+Often these names are unusable for reader-friendly documents.
+See, e.g., `cohortName[6, "cohortName"]` which is `r cohortName[1, "cohortName"]`.
+We will re-code these names for prettier output.
+Here we demonstrate `DT::datatable` that provides an interactive (HTML-only) table renderer useful for web-pages and presentations.
+
+```{r}
+cohortName$shortCohortName <- c("AD", "UTI", "Cef", "AA", "FQ", "FQ2", 
+                                "UTI2", "Cef2", "TMP", "AA/AD", "TMP2")
+
+DT::datatable(cohortName)
+```
+
+# Basic results queries
+
+Here is an example of a basic query to a `cohort_counts` table to return cohort sizes.
+We then output the counts using a well-formatted table
+
+```{r, cohortCounts, message=FALSE, cache=TRUE}
+connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
+sql <- SqlRender::render(sql = "
+  SELECT database_id, cohort_id, cohort_subjects FROM @schema.cg_cohort_count",
+  schema = schema)
+                        
+cohortCount <- DatabaseConnector::querySql(connection = connection,
+                                            sql = sql,
+                                            snakeCaseToCamelCase = TRUE) %>% 
+  inner_join(databaseName, by = "databaseId") %>% 
+  inner_join(cohortName, by = "cohortId") %>%
+  select(shortCohortName, shortDatabaseName, cohortSubjects) %>%
+  rename(cohortName = shortCohortName, databaseName = shortDatabaseName) %>%
+  arrange(cohortName,  databaseName)
+
+DatabaseConnector::disconnect(connection)
+```
+
+## Hints for beautiful tables
+
+The `kableExtra` package (especially when printed to PDF) makes beautiful tables.
+
+```{r, message=FALSE}
+table <- cohortCount %>% filter(cohortName %in% c("FQ", "TMP")) %>%
+  rename(Cohort = cohortName, Database = databaseName, Subjects = cohortSubjects) %>%
+  tidyr::spread(Cohort, Subjects)
+
+tab <- table %>% kbl() %>% kable_classic(full_width = F) %>%
+  add_header_above(c(" " = 1, "Exposure" = 2)) %>%
+  row_spec(0, align = "c")
+
+if (knitr::is_latex_output()) {
+  tab %>% kable_styling(latex_options = "striped",
+                          font_size = latex_table_font_size)
+} else {
+  tab ## bootstrap-striped is not nicely compatible with `add_header_above`
+}
+```
+
+Often it is most convenient to hand-craft `latex` table headers and footers and `cat` this material directly to the output.
+Here is a silly example.
+
+
+```{r, echo=TRUE, eval=FALSE}
+# Requires "results='asis'"
+
+library(xtable)
+cat(gsub("\\\\", "\\", r"{
+  \begin{table}[h]
+  \begin{center}
+  \begin{tabular}{lrr}
+  \hline
+  \multicolumn{1}{c}{$\alpha$} & \multicolumn{1}{c}{$\beta$} & \multicolumn{1}{c}{$\delta$} \\\\
+}", fixed = TRUE))
+
+print(xtable(table, format = "latex"), 
+      include.rownames = FALSE, include.colnames = FALSE, only.contents = TRUE)
+
+cat(gsub("\\\\", "\\", r"{
+  \end{tabular}
+  \end{center}
+  \caption{A silly caption with \LaTeX commands}
+  \end{table}
+}", fixed = TRUE))
+```
+
+```{r, echo=FALSE, results='asis', message=FALSE}
+# Requires "results='asis'"
+
+library(xtable)
+cat(gsub("\\\\", "\\", r"{
+  \begin{table}[h]
+  \begin{center}
+  \begin{tabular}{lrr}
+  \hline
+  \multicolumn{1}{c}{$\alpha$} & \multicolumn{1}{c}{$\beta$} & \multicolumn{1}{c}{$\delta$} \\\\
+}", fixed = TRUE))
+
+print(xtable(table, format = "latex"), 
+      include.rownames = FALSE, include.colnames = FALSE, only.contents = TRUE)
+
+cat(gsub("\\\\", "\\", r"{
+  \end{tabular}
+  \end{center}
+  \caption{A silly caption with \LaTeX commands}
+  \end{table}
+}", fixed = TRUE))
+
+```
+
+Note that if one abhors escaping backslash-characters, then one can read the header and footer from text files.
+
+# Working with `CohortMethod` results
+
+Unfortunately, we currently do *not* have a shared repository of functions to generate typical results figures and tables.
+Even `OhdsiShinyModules` hides these tools inside inaccessible `shiny`-functions.
+Until we solve this limitation, we recommend using copying code from previous public manuscripts.
+The `LegendT2dmEvidenceExplorer` from LEGEND-T2DM is a good example: (`getCovariateBalance()`)[https://github.com/ohdsi-studies/LegendT2dmEvidenceExplorer/blob/b3564ea3c8257817d92de24b0f2244fed1df1f99/inst/shiny/DataPulls.R#L331]
+ 
+
+
+[ADD EXAMPLE]
+

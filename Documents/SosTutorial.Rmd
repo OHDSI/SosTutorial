@@ -1,5 +1,5 @@
 ---
-title: "| OPERATIONS MANUAL\n| \n| Strategus Data Model\n| \n| \n"
+title: "| OPERATIONS MANUAL\n| \n| Tutorial #1\n| \n| \n"
 author: "Marc A. Suchard"
 fontsize: 12pt
 geometry: margin=1in
@@ -71,7 +71,13 @@ library(kableExtra)
 library(DT)
 
 latex_table_font_size <- 8
+
+Sys.setenv(TESTTHAT = "TRUE")
 ```
+
+# Installation
+
+[TODO]
 
 # Access and schema
 
@@ -118,76 +124,6 @@ if (knitr::is_latex_output()) {
   tab %>% kable_styling(bootstrap_options = "striped")
 }
 ```
-
-# Data models
-
-```{r echo=FALSE}
-printDataModelSpecification <- function(filename, level = "###") {
-
-  specifications <- readr::read_csv(filename, show_col_types = FALSE) 
-  
-  if ("optional" %in% names(specifications)) {
-    specifications <- specifications %>% filter(optional == "No")
-  }
-  
-  tables <- split(specifications, specifications$table_name)
-  
-  for (table in tables) {
-    header <- sprintf("%s Table %s", level, table$table_name[1])
-    
-    table <- table %>%
-      select(Field = .data$column_name, Type = .data$data_type, Key = .data$primary_key
-             # , Description = .data$description
-      ) %>%
-      kbl(linesep = "", booktabs = TRUE, longtable = TRUE)
-    
-    if (knitr::is_latex_output()) {
-      writeLines("")
-      writeLines(header)
-      
-      writeLines(table %>%
-                   kable_styling(latex_options = "striped", font_size = latex_table_font_size) %>%
-                   column_spec(1, width = "10em") %>%
-                   column_spec(2, width = "5em") %>%
-                   column_spec(3, width = "3em") %>%
-                   column_spec(4, width = "16em"))
-    } else if (knitr::is_html_output()) {
-      writeLines("")
-      writeLines(header)
-      
-      writeLines(table %>%
-                   kable_styling(bootstrap_options = "striped"))
-    }
-  }
-}
-```
-
-```{r echo=FALSE, results="asis", warning=FALSE, cache=TRUE}
-modules <- readr::read_delim(col_names = TRUE, delim = ";", trim_ws = TRUE, 
-                            show_col_types = FALSE,file = "
-  name ; prefix ; url
-  Characterization ; c ; https://raw.githubusercontent.com/OHDSI/Characterization/main/inst/settings/resultsDataModelSpecification.csv
-  CohortDiagnostics ; cd ; https://raw.githubusercontent.com/OHDSI/CohortDiagnostics/main/inst/settings/resultsDataModelSpecification.csv
-  CohortGenerator; gc ; https://raw.githubusercontent.com/OHDSI/CohortGeneratorModule/main/resultsDataModelSpecification.csv
-  CohortIncidence ; ci; https://raw.githubusercontent.com/OHDSI/CohortIncidenceModule/master/resultsDataModelSpecification.csv
-  CohortMethod ; ; https://raw.githubusercontent.com/OHDSI/CohortMethod/main/inst/csv/resultsDataModelSpecification.csv
-  PatientLevelPrediction ; plp ; https://raw.githubusercontent.com/OHDSI/PatientLevelPrediction/main/inst/settings/resultsDataModelSpecification.csv
-")
-
-for (i in 1:nrow(modules)) {
-  cat("## ", modules[i,]$name)
-  printDataModelSpecification(filename = modules[i,]$url,
-                              level = "###")
-}
-```
-
-## Fields with minimum values
-
-Some fields contain patient counts or fractions that are easily converted to patient counts.
-To prevent identifiability, these fields are subject to a minimum value.
-When the value falls below this minimum, it is replaced with the negative value of the minimum.
-For example, if the minimum subject count is 5, and the actual count is 2, the value stored in the data model will be -5, which could be represented as '\<5' to the user.
-Note that the value 0 is permissible, as it identifies no persons.
 
 # Retrieving database meta-data
 
@@ -285,9 +221,12 @@ The `kableExtra` package (especially when printed to PDF) makes beautiful tables
 ```{r, message=FALSE}
 table <- cohortCount %>% filter(cohortName %in% c("FQ", "TMP")) %>%
   rename(Cohort = cohortName, Database = databaseName, Subjects = cohortSubjects) %>%
+  mutate(Subjects = prettyNum(Subjects, 
+                              format = "d", 
+                              big.mark = ",")) %>% # Can easily change for _Lancet_
   tidyr::spread(Cohort, Subjects)
 
-tab <- table %>% kbl() %>% kable_classic(full_width = F) %>%
+tab <- table %>% kbl(align = "lrr") %>% kable_classic(full_width = F) %>%
   add_header_above(c(" " = 1, "Exposure" = 2)) %>%
   row_spec(0, align = "c")
 
@@ -327,8 +266,6 @@ cat(gsub("\\\\", "\\", r"{
 ```
 
 ```{r, echo=FALSE, results='asis', message=FALSE}
-# Requires "results='asis'"
-
 library(xtable)
 cat(gsub("\\\\", "\\", r"{
   \begin{table}[h]
@@ -356,10 +293,104 @@ Note that if one abhors escaping backslash-characters, then one can read the hea
 
 Unfortunately, we currently do *not* have a shared repository of functions to generate typical results figures and tables.
 Even `OhdsiShinyModules` hides these tools inside inaccessible `shiny`-functions.
-Until we solve this limitation, we recommend using copying code from previous public manuscripts.
-The `LegendT2dmEvidenceExplorer` from LEGEND-T2DM is a good example: (`getCovariateBalance()`)[https://github.com/ohdsi-studies/LegendT2dmEvidenceExplorer/blob/b3564ea3c8257817d92de24b0f2244fed1df1f99/inst/shiny/DataPulls.R#L331]
+Until we solve this limitation, we recommend duplicating code from previous public manuscripts.
+The `LegendT2dmEvidenceExplorer` from LEGEND-T2DM is a good example: [`getCovariateBalance()`](https://github.com/ohdsi-studies/LegendT2dmEvidenceExplorer/blob/b3564ea3c8257817d92de24b0f2244fed1df1f99/inst/shiny/DataPulls.R#L331)
  
+## Query the design choices and comparisons
 
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+connection <- DatabaseConnector::connect(connectionDetails)
 
-[ADD EXAMPLE]
+sql <- paste0("SET search_path TO ", schema, ";")
+DatabaseConnector::executeSql(connection = connection, sql = sql)
 
+sql <- "
+  SELECT DISTINCT target_id, comparator_id,
+    cm_analysis.analysis_id, cm_analysis.description
+  FROM cm_covariate_balance
+  INNER JOIN cm_analysis
+  ON cm_analysis.analysis_id = cm_covariate_balance.analysis_id"
+
+analysis <- DatabaseConnector::querySql(connection = connection,
+                                        sql = sql,
+                                        snakeCaseToCamelCase = TRUE)
+
+DatabaseConnector::disconnect(connection)
+
+datatable(analysis %>% arrange(analysisId, targetId, comparatorId))
+```
+
+## Covariate balance
+
+```{r, cache=TRUE}
+# Stolen from `ShinyShinyModules`
+getCovariateBalance <- function(connection, schema,
+                                targetId,
+                                comparatorId,
+                                analysisId,
+                                databaseId,
+                                outcomeId) {
+  sql <- "  
+      SELECT
+        cmcb.database_id,
+        cmcb.covariate_id,
+        cmc.covariate_name,
+        cmc.covariate_analysis_id analysis_id,
+        cmcb.target_mean_before before_matching_mean_treated,
+        cmcb.comparator_mean_before before_matching_mean_comparator,
+        abs(cmcb.std_diff_before) abs_before_matching_std_diff,
+        cmcb.target_mean_after after_matching_mean_treated,
+        cmcb.comparator_mean_after after_matching_mean_comparator,
+        abs(cmcb.std_diff_after) abs_after_matching_std_diff
+      FROM
+        (select * from  @results_schema.@table_prefixcovariate_balance 
+        WHERE target_id = @target_id
+        AND comparator_id = @comparator_id
+        AND outcome_id = @outcome_id
+        AND analysis_id = @analysis_id
+        AND database_id = '@database_id'
+        ) as cmcb
+        INNER JOIN @results_schema.@table_prefixcovariate cmc 
+          ON cmcb.covariate_id = cmc.covariate_id 
+          AND cmcb.analysis_id = cmc.analysis_id 
+          AND cmcb.database_id = cmc.database_id"
+  
+  sql <- SqlRender::render(sql,
+                           target_id = targetId,
+                           comparator_id = comparatorId,
+                           database_id = databaseId,
+                           results_schema = schema,
+                           table_prefix = "cm_",
+                           analysis_id = analysisId,
+                           outcome_id = outcomeId)
+  
+  balance <- DatabaseConnector::querySql(connection, sql,
+                                         snakeCaseToCamelCase = TRUE)
+  return(balance)
+}
+```
+
+```{r, cache=TRUE, message=FALSE}
+connection <- DatabaseConnector::connect(connectionDetails)
+
+balance <- getCovariateBalance(connection, schema,
+                               targetId = 1782488001,     # FQ2
+                               comparatorId = 1782487001, # Cef2
+                               analysisId = 2,
+                               databaseId = -7753527,     # VA
+                               outcomeId = 1782489)       # AA/AD
+
+DatabaseConnector::disconnect(connection)
+
+datatable(balance %>% select(-databaseId, -analysisId),
+          colnames = c("ID", "Name", "bT", "bC", "bSD", "aT", "aC", "aSD"),
+          rownames = NULL)
+```
+
+It remains straight-forward to adapt existing plots or generate one's own.
+
+```{r}
+plot(balance$absBeforeMatchingStdDiff, balance$absAfterMatchingStdDiff,
+     xlim = c(0, 0.4), ylim = c(0, 0.4),
+     xlab = "Before", ylab = "After")
+```

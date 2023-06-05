@@ -5,5 +5,7 @@
 
 *.html
 *_cache
+*_files
 
 Credentials.R
+*.jar

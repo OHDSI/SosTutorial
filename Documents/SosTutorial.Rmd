@@ -1,5 +1,5 @@
 ---
-title: "| OPERATIONS MANUAL\n| \n| Tutorial #1\n| \n| \n"
+title: "| SOS Challenge \n| \n| Evidence Tutorial #1\n| \n| \n"
 author: "Marc A. Suchard"
 fontsize: 12pt
 geometry: margin=1in
@@ -77,7 +77,25 @@ Sys.setenv(TESTTHAT = "TRUE")
 
 # Installation
 
-[TODO]
+Follow the instructions on the HADES website to [how to set up R](https://ohdsi.github.io/Hades/rSetup.html) and [how to install HADES](https://ohdsi.github.io/Hades/installingHades.html).
+
+While this tutorial does not use many of the HADES packages, these are often quite useful to have.  
+This tutorial does require `DatabaseConnector` and `SqlRender` from HADES, along with `keyring`, dplyr`, `kableExtra`, `DT` and their dependencies.
+These can be installed directly from CRAN.
+
+```{r install, eval=FALSE}
+install.packages(c("SqlRender", "DatabaseConnector",
+                   "keyring", "dplyr", "kableExtra"))
+```
+
+We will use `keyring` to hide database credentials.
+The following codes only needs to be executed once per machine.
+
+```{r credentials, eval=FALSE}
+keyring::key_set_with_value("sosTutorialUser", password = "<FILL-IN>")
+keyring::key_set_with_value("sosTutorialPassword", password = "<FILL-IN>")
+keyring::key_set_with_value("sosTutorialServer", password = "<FILL-IN>")
+```
 
 # Access and schema
 
@@ -289,7 +307,7 @@ cat(gsub("\\\\", "\\", r"{
 
 Note that if one abhors escaping backslash-characters, then one can read the header and footer from text files.
 
-# Working with `CohortMethod` results
+# Working with `CohortMethod`
 
 Unfortunately, we currently do *not* have a shared repository of functions to generate typical results figures and tables.
 Even `OhdsiShinyModules` hides these tools inside inaccessible `shiny`-functions.
@@ -393,4 +411,12 @@ It remains straight-forward to adapt existing plots or generate one's own.
 plot(balance$absBeforeMatchingStdDiff, balance$absAfterMatchingStdDiff,
      xlim = c(0, 0.4), ylim = c(0, 0.4),
      xlab = "Before", ylab = "After")
+abline(h = 0.1, lty = 2)
 ```
+
+When saving figures to disk, use a vector-graphic format (e.g., PDF), as these formats can scale to any size without resolution loss.
+For `R-base` plotting, the relevant functions are `pdf()` and `dev.off()`.
+For `gg` plotting, use `ggsave(filename = "<NAME>.pdf")`.
+
+## Effect estimates
+

@@ -50,8 +50,8 @@ header-includes:
 longtable: yes
 mainfont: Arial
 params:
-  date: '2023-06-01'
-  version: 0.0.99
+  date: '2023-07-12'
+  version: 1.0.0
 subtitle: 'Version: `r params$version`'
 link-citations: true
 csl: bmj.csl
@@ -69,6 +69,7 @@ knitr::knit_hooks$set(chunk = function(x, options) {
 library(dplyr)
 library(kableExtra)
 library(DT)
+library(wesanderson)
 
 latex_table_font_size <- 8
 
@@ -77,10 +78,10 @@ Sys.setenv(TESTTHAT = "TRUE")
 
 # Installation
 
-Follow the instructions on the HADES website to [how to set up R](https://ohdsi.github.io/Hades/rSetup.html) and [how to install HADES](https://ohdsi.github.io/Hades/installingHades.html).
+Follow the instructions on the HADES website on [how to set up R](https://ohdsi.github.io/Hades/rSetup.html) and [how to install HADES](https://ohdsi.github.io/Hades/installingHades.html).
 
-While this tutorial does not use many of the HADES packages, these are often quite useful to have.  
-This tutorial does require `DatabaseConnector` and `SqlRender` from HADES, along with `keyring`, dplyr`, `kableExtra`, `DT` and their dependencies.
+While this tutorial does not use many of the HADES packages, these are often quite useful to have.
+This tutorial does require `DatabaseConnector` and `SqlRender` from HADES, along with `keyring`, `dplyr`, `kableExtra`, `DT` and their dependencies.
 These can be installed directly from CRAN.
 
 ```{r install, eval=FALSE}
@@ -99,8 +100,9 @@ keyring::key_set_with_value("sosTutorialServer", password = "<FILL-IN>")
 
 # Access and schema
 
-This document describes the data models for `Strategus` modules and some instructions on how to access results in these models.
-We hold results on the OHDSI public database server `shinydb` that runs `postgresql`.
+We hold the SOS Challenge results on the OHDSI public database server `shinydb`.
+The web-page at [https://bit.ly/strategus_data_model](https://ohdsi.github.io/SosTutorial/StrategusDataModel.html) describes the data models for `Strategus` modules and some instructions on how to access results in these models.
+Our database server runs `postgresql`.
 You can install the `postgresql` JDBC drivers; this only needs to be done once.
 
 It is recommend to specify the environmental variable `DATABASECONNECT_JAR_FOLDER=<folder-of-your-choice>` in `.Renviron` located in the user's home directory.
@@ -177,8 +179,8 @@ databaseName
 Now is a good time to (manually) change the abbreviations in `databaseName` to consistent, similar-length, reader-friendly choices for our manuscript(s).
 
 ```{r}
-databaseName$shortDatabaseName <- c("JMDC", "MDCD", "Ausom", "NHIS", "OptumDOD", 
-                                    "VA", "OptumEHR", "CCAE", "PhM", "TMU")
+databaseName$shortDatabaseName <- c("JMDC", "MDCD", "Ausom", "NHIS", "OptumDOD",
+                                    "OptumEHR", "CCAE", "PhM", "TMU", "VA", "CUMC")
 ```
 
 Likewise, we retrieve reader-friendly cohort names.
@@ -419,4 +421,294 @@ For `R-base` plotting, the relevant functions are `pdf()` and `dev.off()`.
 For `gg` plotting, use `ggsave(filename = "<NAME>.pdf")`.
 
 ## Effect estimates
+
+```{r echo=FALSE}
+makePrettyFigure <- function(
+    table,
+    design = data.frame(
+      databaseId = c("SIDIAP", "VA-OMOP", "CUIMC", "Meta-analysis"),
+      point = c(20, 20, 18, 20)),
+    poorBalance = "grey70",
+    fileName,
+    pageHeight = 2.5,
+    pageWidth = 6,
+    textCex = 0.6,
+    numDb = 4,
+    pointStyle = 21,
+    pointSize = 0.6,
+    btwSkip = 0,
+    png = FALSE,
+    shiftOutcomeName = 2,
+    primaryAnalysisId = 2,
+    addSecondary = FALSE,
+    topStretch = 2.5,
+    seconardAnalysisId = primaryAnalysisId,
+    outcomeIds = c(23,29,36,42),
+    outcomeNames = c("Diagnosis", "+Hospital", "PNA", "PAAS"),
+    outcomeColors = c(wes_palette("Moonrise3")[5],
+                       wes_palette("Moonrise2")[2],
+                       wes_palette("Moonrise3")[3],
+                       wes_palette("Moonrise2")[3]),
+    cohortNames = c("ACE/ARB vs CCB/THZ", "ACE vs CCB/THZ", "ARB vs CCB/THZ", "ACE vs ARB", "C5", "C6")
+    ) {
+
+  table <- table %>% filter(!is.na(rr))
+
+  table5 <- table %>%
+    filter(analysisId == primaryAnalysisId) %>%
+    mutate(point = pointStyle, size = pointSize) %>%
+    mutate(color = ifelse(!pass, poorBalance, "black")) %>%
+    mutate(balanceColor = ifelse(!pass, poorBalance, "black"))
+
+  table6 <- table %>%
+    left_join(design, by = "databaseId") %>%
+    filter(analysisId == seconardAnalysisId) %>%
+    mutate(point = 21,size = 0.6) %>%
+    mutate(color = ifelse(!pass, "white", "white")) %>%
+    mutate(balanceColor = ifelse(!pass, poorBalance, "black"))
+
+  delta5 <- 0
+  delta6 <- 0
+
+  if (addSecondary) {
+    delta5 <- +0.25
+    delta6 <- -0.25
+  }
+
+  if (png) {
+    png(fileName, height = pageHeight, width = pageWidth, units = "in", res = 300)
+  } else {
+    pdf(file = fileName, height = pageHeight, width = pageWidth)
+  }
+
+  layout <- table %>%
+    select(majorOrder, minorOrder, cumMajorSkip, databaseName) %>% distinct() %>%
+    arrange(majorOrder, minorOrder) %>%
+    mutate(index = row_number() - 1,
+           row = index + btwSkip * cumMajorSkip) %>%
+    select(-cumMajorSkip, -index) %>%
+    mutate(skips = ifelse(majorOrder - lag(majorOrder, default = 0) == 0, 0, 1))
+
+  ymax <- max(layout$row)
+
+  par(mar = c(1,1,1,1))
+
+  plot(0,0, type = "n",
+       ylim = c(-3, ymax),
+       xlim = c(0, 12), axes = FALSE,
+       ylab = "", xlab = "")
+
+  cohortPositions <- layout %>% filter(skips == 1) %>% pull(row) - 1
+
+  text(x = 0, y = ymax - cohortPositions, labels = cohortNames, pos = 4, cex = textCex)
+
+  # minorNames <- rep(c("Monotherapy", "+ Combination"), length(cohortNames))
+  # minorTicks <- tab %>% filter(databaseId == "SIDIAP") %>% select(row) %>% pull() - 1
+  # text(x = 0.25, y = ymax - minorTicks, labels = minorNames, pos = 4, cex = textCex)
+  #
+  text(x = 0.5, y = ymax - layout$row, labels = layout$databaseName, pos = 4, cex = textCex)
+
+  start <- 3.5
+  width <- 2
+  spacer <- 2.4
+  tick <- 0.1
+
+  scaleMin <- 1/4  # -1
+  scaleMax <- 4    # +1
+
+  # points(x = 4, y = ymax - 0.5, pch = 21, bg = "black")
+  # text(x = 4.025, y = ymax - 0.5, labels = "PS-stratified",
+  #      pos = 4, cex = textCex, adj = 0.5)
+  # 
+  # points(x = 6, y = ymax - 0.5, pch = 21, bg = "white")
+  # text(x = 6.025, y = ymax - 0.5, labels = "PS-matched",
+  #      pos = 4, cex = textCex, adj = 0.5)
+  # 
+  points(x = 10, y = ymax - 0.5, pch = 22, bg = poorBalance, col = poorBalance)
+  text(x = 10.025, y = ymax - 0.5, labels = "Fails study diagnostics",
+       pos = 4, cex = textCex, adj = 0.5)
+
+  scale <- function(x) {
+    log(x) / (log(scaleMax) - log(scaleMin)) * width
+  }
+
+  clip_min <- function(x) {
+    pmax(x, -width / 2)
+  }
+
+  clip_max <- function(x) {
+    pmin(x, +width / 2)
+  }
+
+  clip_rm <- function(x) {
+    x[x > width / 2] <- NA
+    x[x < -width / 2] <- NA
+    x
+  }
+
+  # library(wesanderson)
+
+  outcomeColors <- adjustcolor(outcomeColors, alpha.f = 0.2)
+
+  # designColors <- c(wes_palette("Moonrise2")[1],
+  #                   wes_palette("Moonrise2")[2])
+  # balancePointColor <- wes_palette("Moonrise2")[4]
+  # designColors <- adjustcolor(designColors, alpha.f = 0.2)
+
+  for (i in 1:3) {
+
+    offset <- start + (i - 1) * spacer
+
+    rect(xleft = offset + scale(scaleMin),
+         xright = offset + scale(scaleMax),
+         ytop = ymax - 1.5 + topStretch,
+         ybottom = -0.5,
+         col = outcomeColors[i], #"grey90",
+         border = NA)
+
+    segments(x0 = offset, x1 = offset,
+             y0 = -0.5, y1 = ymax - 2 + topStretch, lty = 3)
+
+    # Primary analysis
+
+    tab <- table5 %>% filter(outcomeId == outcomeIds[i]) %>%
+      inner_join(layout, by = c("majorOrder", "minorOrder"))
+
+    segments(x0 = offset + clip_min(scale(tab$calibratedCi95Lb)),
+             x1 = offset + clip_max(scale(tab$calibratedCi95Ub)),
+             y0 = ymax - tab$row + delta5, y1 = ymax - tab$row + delta5,
+             col = tab$balanceColor)
+
+    segments(x0 = offset + clip_rm(scale(tab$calibratedCi95Lb)),
+             x1 = offset + clip_rm(scale(tab$calibratedCi95Lb)),
+             y0 = ymax - tab$row + tick + delta5,
+             y1 = ymax - tab$row - tick + delta5,
+             col = tab$balanceColor)
+
+    segments(x0 = offset + clip_rm(scale(tab$calibratedCi95Ub)),
+             x1 = offset + clip_rm(scale(tab$calibratedCi95Ub)),
+             y0 = ymax - tab$row + tick + delta5,
+             y1 = ymax - tab$row - tick + delta5,
+             col = tab$balanceColor)
+
+    points(x = offset + clip_rm(scale(tab$calibratedRr)),
+           y = ymax - tab$row + delta5,
+           pch = tab$point,
+           bg = tab$color,
+           cex = tab$size,
+           col = tab$balanceColor)
+
+    if (addSecondary) {
+
+      # Secondary analysis
+
+      tab <- table6 %>% filter(outcomeId == outcomeIds[i]) %>%
+        inner_join(layout, by = c("majorOrder", "minorOrder"))
+
+      segments(x0 = offset + clip_min(scale(tab$calibratedCi95Lb)),
+               x1 = offset + clip_max(scale(tab$calibratedCi95Ub)),
+               y0 = ymax - tab$row + delta6, y1 = ymax - tab$row + delta6,
+               col = tab$balanceColor)
+
+      segments(x0 = offset + clip_rm(scale(tab$calibratedCi95Lb)),
+               x1 = offset + clip_rm(scale(tab$calibratedCi95Lb)),
+               y0 = ymax - tab$row + tick + delta6,
+               y1 = ymax - tab$row - tick + delta6,
+               col = tab$balanceColor)
+
+      segments(x0 = offset + clip_rm(scale(tab$calibratedCi95Ub)),
+               x1 = offset + clip_rm(scale(tab$calibratedCi95Ub)),
+               y0 = ymax - tab$row + tick + delta6,
+               y1 = ymax - tab$row - tick + delta6,
+               col = tab$balanceColor)
+
+      points(x = offset + clip_rm(scale(tab$calibratedRr)),
+             y = ymax - tab$row + delta6,
+             pch = tab$point,
+             bg = tab$color,
+             cex = tab$size,
+             col = tab$balanceColor)
+    }
+
+    # Bottom marks
+
+    bt <- -0.75
+
+    segments(x0 = offset - width / 2,
+             x1 = offset + width / 2,
+             y0 = bt, y1 = bt)
+
+    marks <- scale(c(1/4, 1/2, 1, 2, 4))
+    labels <- c("1/4", "1/2", "1", "2", "4")
+
+    segments(x0 = offset + marks,
+             x1 = offset + marks,
+             y0 = bt,
+             y1 = bt - 0.2)
+
+    text(x = offset + marks,
+         y = bt - 0.1,
+         labels = labels,
+         pos = 1, cex = textCex)
+
+    text(x = offset,
+         y = bt - shiftOutcomeName,
+         labels = outcomeNames[i],
+         cex = 0.8,
+         adj = c(0.5, 1))
+  }
+
+  invisible(dev.off())
+}
+```
+
+```{r effectEstimates, eval=TRUE, message=FALSE}
+connection <- DatabaseConnector::connect(connectionDetails)
+
+sql <- paste0("SET search_path TO ", schema, ";")
+DatabaseConnector::executeSql(connection = connection, sql = sql)
+
+cmResult <- DatabaseConnector::querySql(connection = connection,
+                                        sql = "SELECT * FROM cm_result",
+                                        snakeCaseToCamelCase = TRUE)
+
+cmDiagnostics <- DatabaseConnector::querySql(connection = connection,
+                                        sql = "SELECT * FROM cm_diagnostics_summary",
+                                        snakeCaseToCamelCase = TRUE)
+
+DatabaseConnector::disconnect(connection)
+
+subset <- cmResult %>%
+  filter(outcomeId %in% c(1782489, 1782671, 1782672),         # All outcomes
+         targetId == 1782488001, comparatorId == 1782487001,  # FQ2 vs Cef2
+         analysisId == 2) %>%
+  inner_join(cmDiagnostics %>% 
+               select(databaseId, analysisId, targetId, comparatorId, outcomeId, unblind)) %>%
+  inner_join(databaseName %>% 
+               select(databaseId, shortDatabaseName) %>%
+               rename(databaseName = shortDatabaseName) %>%
+               mutate(minorOrder = row_number()))
+
+# Uses a custom function from the LEGEND-T2DM manuscript package   
+makePrettyFigure(subset %>% 
+                   mutate(majorOrder = 1,
+                          pass = unblind,
+                          cumMajorSkip = 0),
+                 fileName = "SosFigure1.pdf",
+                 outcomeIds = c(1782489,1782671,1782672,42),
+                 outcomeNames = c("AA/AD", "AA", "AD"))
+```
+
+```{r, echo=FALSE, fig.cap="Custom plotting function reporting hazard ratio (HR) and 95% confidence interval estimates across data sources.  Note the beautiful `wesanderson` inspired colors."}
+makePrettyFigure(subset %>%
+                   mutate(majorOrder = 1,
+                          pass = unblind,
+                          cumMajorSkip = 0),
+                 fileName = "SosFigure1.png",
+                 png = TRUE,
+                 outcomeIds = c(1782489,1782671,1782672,42),
+                 outcomeNames = c("AA/AD", "AA", "AD"))
+
+knitr::include_graphics("SosFigure1.png")
+```
 

@@ -78,10 +78,10 @@ Sys.setenv(TESTTHAT = "TRUE")
 
 # Installation
 
-Follow the instructions on the HADES website on [how to set up R](https://ohdsi.github.io/Hades/rSetup.html) and [how to install HADES](https://ohdsi.github.io/Hades/installingHades.html).
+Follow the instructions on the `Hades` website on [how to set up R](https://ohdsi.github.io/Hades/rSetup.html) and [how to install HADES](https://ohdsi.github.io/Hades/installingHades.html).
 
-While this tutorial does not use many of the HADES packages, these are often quite useful to have.
-This tutorial does require `DatabaseConnector` and `SqlRender` from HADES, along with `keyring`, `dplyr`, `kableExtra`, `DT` and their dependencies.
+While this tutorial does not use many of the `Hades` packages, these are often quite useful to have.
+This tutorial does require `DatabaseConnector` and `SqlRender` from `Hades`, along with `keyring`, `dplyr`, `kableExtra`, `DT` and their dependencies.
 These can be installed directly from CRAN.
 
 ```{r install, eval=FALSE}
@@ -342,8 +342,10 @@ datatable(analysis %>% arrange(analysisId, targetId, comparatorId))
 
 ## Covariate balance
 
+Shamelessly (until these functions are exported) stolen from [`OhdsiStudyModules/R`](https://github.com/OHDSI/OhdsiShinyModules/tree/main/R):
+
 ```{r, cache=TRUE}
-# Stolen from `ShinyShinyModules`
+# Stolen from `OhdsiShinyModules`
 getCovariateBalance <- function(connection, schema,
                                 targetId,
                                 comparatorId,

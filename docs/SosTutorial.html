@@ -5516,9 +5516,9 @@ Evidence Tutorial #1<br />
 <p></p>
 <div id="installation" class="section level1" number="1">
 <h1><span class="header-section-number">1</span> Installation</h1>
-<p>Follow the instructions on the HADES website on <a href="https://ohdsi.github.io/Hades/rSetup.html">how to set up R</a> and <a href="https://ohdsi.github.io/Hades/installingHades.html">how to install HADES</a>.</p>
-<p>While this tutorial does not use many of the HADES packages, these are often quite useful to have.
-This tutorial does require <code>DatabaseConnector</code> and <code>SqlRender</code> from HADES, along with <code>keyring</code>, <code>dplyr</code>, <code>kableExtra</code>, <code>DT</code> and their dependencies.
+<p>Follow the instructions on the <code>Hades</code> website on <a href="https://ohdsi.github.io/Hades/rSetup.html">how to set up R</a> and <a href="https://ohdsi.github.io/Hades/installingHades.html">how to install HADES</a>.</p>
+<p>While this tutorial does not use many of the <code>Hades</code> packages, these are often quite useful to have.
+This tutorial does require <code>DatabaseConnector</code> and <code>SqlRender</code> from <code>Hades</code>, along with <code>keyring</code>, <code>dplyr</code>, <code>kableExtra</code>, <code>DT</code> and their dependencies.
 These can be installed directly from CRAN.</p>
 <p></p>
 <div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="fu">install.packages</span>(<span class="fu">c</span>(<span class="st">&quot;SqlRender&quot;</span>, <span class="st">&quot;DatabaseConnector&quot;</span>,</span>
@@ -5914,8 +5914,9 @@ The <code>LegendT2dmEvidenceExplorer</code> from LEGEND-T2DM is a good example: 
 </div>
 <div id="covariate-balance" class="section level2" number="5.2">
 <h2><span class="header-section-number">5.2</span> Covariate balance</h2>
+<p>Shamelessly (until these functions are exported) stolen from <a href="https://github.com/OHDSI/OhdsiShinyModules/tree/main/R"><code>OhdsiStudyModules/R</code></a>:</p>
 <p></p>
-<div class="sourceCode" id="cb15"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" tabindex="-1"></a><span class="co"># Stolen from `ShinyShinyModules`</span></span>
+<div class="sourceCode" id="cb15"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" tabindex="-1"></a><span class="co"># Stolen from `OhdsiShinyModules`</span></span>
 <span id="cb15-2"><a href="#cb15-2" tabindex="-1"></a>getCovariateBalance <span class="ot">&lt;-</span> <span class="cf">function</span>(connection, schema,</span>
 <span id="cb15-3"><a href="#cb15-3" tabindex="-1"></a>                                targetId,</span>
 <span id="cb15-4"><a href="#cb15-4" tabindex="-1"></a>                                comparatorId,</span>

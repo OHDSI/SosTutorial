@@ -697,7 +697,7 @@ makePrettyFigure(subset %>%
                           pass = unblind,
                           cumMajorSkip = 0),
                  fileName = "SosFigure1.pdf",
-                 outcomeIds = c(1782489,1782671,1782672,42),
+                 outcomeIds = c(1782489,1782671,1782672),
                  outcomeNames = c("AA/AD", "AA", "AD"))
 ```
 

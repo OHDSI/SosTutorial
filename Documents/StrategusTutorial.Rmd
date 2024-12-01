@@ -1,0 +1,720 @@
+---
+title: "| Strategus Evidence \n| \n| Tutorial #1\n| \n| \n"
+author: "Marc A. Suchard"
+fontsize: 12pt
+geometry: margin=1in
+always_allow_html: true
+output:
+  bookdown::html_document2:
+    df_print: paged
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    number_sections: yes
+    number_tables: yes
+    highlight: zenburn
+    css: "style.css"
+  bookdown::pdf_document2:
+    keep_tex: yes
+    latex_engine: xelatex
+    md_extensions: +raw_attribute
+    number_sections: yes
+    # citation_package: natbib
+    includes:
+      before_body: title.tex
+header-includes:
+- \usepackage[numbers,sort&compress]{natbib}
+- \usepackage{booktabs}
+- \usepackage{longtable}
+- \usepackage{array}
+- \usepackage{multirow}
+- \usepackage{wrapfig}
+- \usepackage{float}
+- \usepackage{colortbl}
+- \usepackage{pdflscape}
+- \usepackage{tabu}
+- \usepackage{threeparttable}
+- \usepackage{threeparttablex}
+- \usepackage[normalem]{ulem}
+- \usepackage{makecell}
+- \usepackage{caption}
+- \usepackage{rotating}
+- \usepackage{multirow}
+- \usepackage{mwe,tikz}
+- \usepackage[percent]{overpic}
+- \usepackage{enumitem}
+- \usepackage{hyperref}
+- \newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
+- \newcommand{\footerDate}{`r params$date`}
+- \input{header.tex}
+longtable: yes
+mainfont: Arial
+params:
+  date: '2023-07-12'
+  version: 1.0.0
+subtitle: 'Version: `r params$version`'
+link-citations: true
+csl: bmj.csl
+---
+
+```{r setup, include=FALSE}
+def.chunk.hook  <- knitr::knit_hooks$get("chunk")
+knitr::knit_hooks$set(chunk = function(x, options) {
+  x <- def.chunk.hook(x, options)
+  paste0("\n \\", "footnotesize","\n\n", x, "\n\n \\normalsize")
+})
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(dplyr)
+library(kableExtra)
+library(DT)
+library(wesanderson)
+
+latex_table_font_size <- 8
+
+Sys.setenv(TESTTHAT = "TRUE")
+```
+
+# Installation
+
+Follow the instructions on the `Hades` website on [how to set up R](https://ohdsi.github.io/Hades/rSetup.html) and [how to install HADES](https://ohdsi.github.io/Hades/installingHades.html).
+
+While this tutorial does not use many of the `Hades` packages, these are often quite useful to have.
+This tutorial does require `DatabaseConnector` and `SqlRender` from `Hades`, along with `keyring`, `dplyr`, `kableExtra`, `DT` and their dependencies.
+These can be installed directly from CRAN.
+
+```{r install, eval=FALSE}
+install.packages(c("SqlRender", "DatabaseConnector",
+                   "keyring", "dplyr", "kableExtra"))
+```
+
+We will use `keyring` to hide database credentials.
+The following codes only needs to be executed once per machine.
+
+```{r credentials, eval=FALSE}
+keyring::key_set_with_value("strategusTutorialUser", password = "<FILL-IN>")
+keyring::key_set_with_value("strategusTutorialPassword", password = "<FILL-IN>")
+keyring::key_set_with_value("strategusTutorialServer", password = "<FILL-IN>")
+```
+
+Note that `keyring` requires `libsodium` that is sometimes not available.  
+Alternatively, special values can be held in as environmental variables (in eg `.Renviron`) and accessed via `Sys.getenv("strategusTutorialUser")`.
+
+# Access and schema
+
+We hold `Strategus` results on the OHDSI public database server `shinydb`.
+The web-page at [https://bit.ly/strategus_data_model](https://ohdsi.github.io/SosTutorial/StrategusDataModel.html) describes the data models for `Strategus` modules and some instructions on how to access results in these models.
+Our database server runs `postgresql`.
+You can install the `postgresql` JDBC drivers; this only needs to be done once.
+
+It is recommend to specify the environmental variable `DATABASECONNECT_JAR_FOLDER=<folder-of-your-choice>` in `.Renviron` located in the user's home directory.
+In the example below, however, we set the environmental variable manually in `R` to make this document more self-contained.
+
+```{r db, eval=FALSE}
+Sys.setenv(DATABASECONNECTOR_JAR_FOLDER = getwd())
+DatabaseConnector::downloadJdbcDrivers(dbms = "postgresql")
+```
+
+and set-up connection details, in this case using `keyring` to hide usernames and passwords for security`
+
+```{r connect, eval=TRUE}
+# OHDSI shinydb read-only credentials
+connectionDetails <- DatabaseConnector::createConnectionDetails(
+  dbms = "postgresql",
+  server = keyring::key_get("strategusTutorialServer"),
+  user = keyring::key_get("strategusTutorialUser"),
+  password = keyring::key_get("strategusTutorialPassword"))
+```
+
+Table \@ref(tab:schema) provides the `schema` names for some `Strategus` results.
+
+```{r schema, echo=FALSE, warning=FALSE}
+schema <- readr::read_delim(col_names = FALSE, delim = ";", trim_ws = TRUE, 
+                            show_col_types = FALSE,file = "
+  GLP1RA vs DPP4I tutorial ; strategus_tutorial                         
+  Fluoroquinolone and aortic aneurysms ; quinoloneaa
+  Intravitreal anti-VEGF and kidney failure ; antivegfkf
+")
+
+tab <- kbl(schema, col.names = c("study", "schema"),
+           linesep = "", booktabs = TRUE,
+           caption = "Strategus study schema")
+
+if (knitr::is_latex_output()) {
+  tab %>% kable_styling(latex_options = "striped",
+                        font_size = latex_table_font_size)
+} else {
+  tab %>% kable_styling(bootstrap_options = "striped")
+}
+```
+
+# Retrieving database meta-data
+
+We will use the `Hades` packages `DatabaseConnector` and `SqlRender` to query the results tables directly in `R`.  
+Many `join`s and column-`select` can be done either on the server-side (`postgresql`) or client-side (`R`).
+We prefer the server-side when accessing large tables.
+On the client-side, `dplyr` is effective.
+
+Here is an example of a basic query to `database_meta_data` to return data-source names and abbreviations (with client-side `select`):
+
+```{r, metaData, message=FALSE, cache=TRUE}
+schema <- "strategus_tutorial"
+
+connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
+
+sql <- SqlRender::render(sql = "
+  SELECT * FROM @schema.database_meta_data",
+  schema = schema) # parameterized
+                        
+metaData <- DatabaseConnector::querySql(connection = connection,
+                                        sql = sql,
+                                        snakeCaseToCamelCase = TRUE)
+
+DatabaseConnector::disconnect(connection)
+
+names(metaData)
+
+databaseName <- metaData %>% select(cdmSourceAbbreviation, databaseId)
+databaseName
+```
+
+Now is a good time to (manually) change the abbreviations in `databaseName` to consistent, similar-length, reader-friendly choices for our manuscript(s).
+
+```{r}
+databaseName$shortDatabaseName <- c("CCAE", "JMDC", "MDCR", "OEHR")
+```
+
+Likewise, we retrieve reader-friendly cohort names.
+Note that the following codes does not return negative control cohort names; these are not (?) currently stored in the results-set.
+
+```{r, cohortNames, message=FALSE, cache=TRUE}
+connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
+sql <- SqlRender::render(sql = "
+  SELECT DISTINCT cohort_id, cohort_name FROM @schema.cg_cohort_generation",
+  schema = schema)
+                        
+cohortName <- DatabaseConnector::querySql(connection = connection,
+                                            sql = sql,
+                                            snakeCaseToCamelCase = TRUE) 
+
+DatabaseConnector::disconnect(connection)
+```
+
+Often these names are unusable for reader-friendly documents.
+See, e.g., `cohortName[1, "cohortName"]` which is `r cohortName[1, "cohortName"]`.
+We will re-code these names for prettier output.
+Here we demonstrate `DT::datatable` that provides an interactive (HTML-only) table renderer useful for web-pages and presentations.
+
+```{r}
+cohortName$shortCohortName <- c("GLP1RA", "AMI/inpat", "AMI/all", "Diarrhea", "DPP4I/ex",
+                                "T2DM/restrict", "T2DM/all", "GLP1RA/ex", "DPP4I") 
+                               
+
+DT::datatable(cohortName)
+```
+
+# Basic results queries
+
+Here is an example of a basic query to a `cohort_counts` table to return cohort sizes.
+We then output the counts using a well-formatted table
+
+```{r, cohortCounts, message=FALSE, cache=TRUE}
+connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
+sql <- SqlRender::render(sql = "
+  SELECT database_id, cohort_id, cohort_subjects FROM @schema.cg_cohort_count",
+  schema = schema)
+                        
+cohortCount <- DatabaseConnector::querySql(connection = connection,
+                                            sql = sql,
+                                            snakeCaseToCamelCase = TRUE) %>% 
+  inner_join(databaseName, by = "databaseId") %>% 
+  inner_join(cohortName, by = "cohortId") %>%
+  select(shortCohortName, shortDatabaseName, cohortSubjects) %>%
+  rename(cohortName = shortCohortName, databaseName = shortDatabaseName) %>%
+  arrange(cohortName,  databaseName)
+
+DatabaseConnector::disconnect(connection)
+```
+
+## Hints for beautiful tables
+
+The `kableExtra` package (especially when printed to PDF) makes beautiful tables.
+
+```{r, message=FALSE}
+table <- cohortCount %>% filter(cohortName %in% c("GLP1RA", "DPP4I")) %>%
+  rename(Cohort = cohortName, Database = databaseName, Subjects = cohortSubjects) %>%
+  mutate(Subjects = prettyNum(Subjects, 
+                              format = "d", 
+                              big.mark = ",")) %>% # Can easily change for _Lancet_
+  tidyr::spread(Cohort, Subjects)
+
+tab <- table %>% kbl(align = "lrr") %>% kable_classic(full_width = F) %>%
+  add_header_above(c(" " = 1, "Exposure" = 2)) %>%
+  row_spec(0, align = "c")
+
+if (knitr::is_latex_output()) {
+  tab %>% kable_styling(latex_options = "striped",
+                          font_size = latex_table_font_size)
+} else {
+  tab ## bootstrap-striped is not nicely compatible with `add_header_above`
+}
+```
+
+Often it is most convenient to hand-craft `latex` table headers and footers and `cat` this material directly to the output.
+Here is a silly example.
+
+
+```{r, echo=TRUE, eval=FALSE}
+# Requires "results='asis'"
+
+library(xtable)
+cat(gsub("\\\\", "\\", r"{
+  \begin{table}[h]
+  \begin{center}
+  \begin{tabular}{lrr}
+  \hline
+  \multicolumn{1}{c}{$\alpha$} & \multicolumn{1}{c}{$\beta$} & \multicolumn{1}{c}{$\delta$} \\\\
+}", fixed = TRUE))
+
+print(xtable(table, format = "latex"), 
+      include.rownames = FALSE, include.colnames = FALSE, only.contents = TRUE)
+
+cat(gsub("\\\\", "\\", r"{
+  \end{tabular}
+  \end{center}
+  \caption{A silly caption with \LaTeX commands}
+  \end{table}
+}", fixed = TRUE))
+```
+
+```{r, echo=FALSE, results='asis', message=FALSE}
+library(xtable)
+cat(gsub("\\\\", "\\", r"{
+  \begin{table}[h]
+  \begin{center}
+  \begin{tabular}{lrr}
+  \hline
+  \multicolumn{1}{c}{$\alpha$} & \multicolumn{1}{c}{$\beta$} & \multicolumn{1}{c}{$\delta$} \\\\
+}", fixed = TRUE))
+
+print(xtable(table, format = "latex"), 
+      include.rownames = FALSE, include.colnames = FALSE, only.contents = TRUE)
+
+cat(gsub("\\\\", "\\", r"{
+  \end{tabular}
+  \end{center}
+  \caption{A silly caption with \LaTeX commands}
+  \end{table}
+}", fixed = TRUE))
+
+```
+
+Note that if one abhors escaping backslash-characters, then one can read the header and footer from text files.
+
+# Working with `CohortMethod`
+
+Unfortunately, we currently do *not* have a shared repository of functions to generate typical results figures and tables.
+Even `OhdsiShinyModules` hides these tools inside inaccessible `shiny`-functions.
+Until we solve this limitation, we recommend duplicating code from previous public manuscripts.
+The `LegendT2dmEvidenceExplorer` from LEGEND-T2DM is a good example: [`getCovariateBalance()`](https://github.com/ohdsi-studies/LegendT2dmEvidenceExplorer/blob/b3564ea3c8257817d92de24b0f2244fed1df1f99/inst/shiny/DataPulls.R#L331)
+ 
+## Query the design choices and comparisons
+
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+connection <- DatabaseConnector::connect(connectionDetails)
+
+sql <- paste0("SET search_path TO ", schema, ";")
+DatabaseConnector::executeSql(connection = connection, sql = sql)
+
+sql <- "
+  SELECT DISTINCT target_id, comparator_id,
+    cm_analysis.analysis_id, cm_analysis.description
+  FROM cm_covariate_balance
+  INNER JOIN cm_analysis
+  ON cm_analysis.analysis_id = cm_covariate_balance.analysis_id"
+
+analysis <- DatabaseConnector::querySql(connection = connection,
+                                        sql = sql,
+                                        snakeCaseToCamelCase = TRUE)
+
+DatabaseConnector::disconnect(connection)
+
+datatable(analysis %>% arrange(analysisId, targetId, comparatorId))
+```
+
+## Covariate balance
+
+Shamelessly (until these functions are exported) stolen from [`OhdsiStudyModules/R`](https://github.com/OHDSI/OhdsiShinyModules/tree/main/R):
+
+```{r, cache=TRUE}
+# Stolen from `OhdsiShinyModules`
+getCovariateBalance <- function(connectionHandler,
+                                resultDatabaseSettings,
+                                targetId,
+                                comparatorId,
+                                analysisId,
+                                databaseId = NULL) {
+  
+      sql <- "
+      SELECT
+        cmscb.database_id,
+        cmc.covariate_name,
+        --cmc.analysis_id analysis_id,
+        cmscb.target_mean_before before_matching_mean_treated,
+        cmscb.comparator_mean_before before_matching_mean_comparator,
+        abs(cmscb.std_diff_before) abs_before_matching_std_diff, --absBeforeMatchingStdDiff 
+        cmscb.target_mean_after after_matching_mean_treated,
+        cmscb.comparator_mean_after after_matching_mean_comparator,
+        abs(cmscb.std_diff_after) abs_after_matching_std_diff
+      FROM
+        @results_schema.@cm_table_prefixshared_covariate_balance cmscb 
+        JOIN @results_schema.@cm_table_prefixcovariate cmc ON cmscb.covariate_id = cmc.covariate_id AND cmscb.analysis_id = cmc.analysis_id AND cmscb.database_id = cmc.database_id -- database_id optional
+       -- JOIN @results_schema.@cm_table_prefixcovariate_analysis cmca ON cmca.analysis_id = cmc.analysis_id  -- question: shouldn't we have a covariate_analysis_id in @table_prefixcovariate table?
+      WHERE
+        cmscb.target_id = @target_id
+        AND cmscb.comparator_id = @comparator_id
+        AND cmscb.analysis_id = @analysis_id
+        --AND cmc.covariate_analysis_id = @covariate_analysis_id
+        AND cmscb.database_id = '@database_id'
+    "
+    
+  sql <- SqlRender::render(sql,
+                           target_id = targetId,
+                           comparator_id = comparatorId,
+                           database_id = databaseId,
+                           results_schema = schema,
+                           cm_table_prefix = "cm_",
+                           analysis_id = analysisId)
+                           
+  
+  result <- DatabaseConnector::querySql(connection, sql,
+                                         snakeCaseToCamelCase = TRUE)
+  
+  return(result)
+}
+```
+
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+connection <- DatabaseConnector::connect(connectionDetails)
+
+balance <- getCovariateBalance(connection, schema,
+                               targetId = 19137001,     # GLP1RA
+                               comparatorId = 19021001, # DPP4I
+                               analysisId = 1,
+                               databaseId = 1902274292) # CCAE
+
+DatabaseConnector::disconnect(connection)
+
+datatable(balance %>% select(-databaseId),
+          colnames = c("Name", "bT", "bC", "bSD", "aT", "aC", "aSD"),
+          rownames = NULL)
+```
+
+It remains straight-forward to adapt existing plots or generate one's own.
+
+```{r}
+plot(balance$absBeforeMatchingStdDiff, balance$absAfterMatchingStdDiff,
+     xlim = c(0, 0.4), ylim = c(0, 0.4),
+     xlab = "Before", ylab = "After")
+abline(h = 0.1, lty = 2)
+```
+
+When saving figures to disk, use a vector-graphic format (e.g., PDF), as these formats can scale to any size without resolution loss.
+For `R-base` plotting, the relevant functions are `pdf()` and `dev.off()`.
+For `gg` plotting, use `ggsave(filename = "<NAME>.pdf")`.
+
+## Effect estimates
+
+```{r echo=FALSE}
+makePrettyFigure <- function(
+    table,
+    design = data.frame(
+      databaseId = c("SIDIAP", "VA-OMOP", "CUIMC", "Meta-analysis"),
+      point = c(20, 20, 18, 20)),
+    poorBalance = "grey70",
+    fileName,
+    pageHeight = 2.5,
+    pageWidth = 6,
+    textCex = 0.6,
+    numDb = 4,
+    pointStyle = 21,
+    pointSize = 0.6,
+    btwSkip = 0,
+    png = FALSE,
+    shiftOutcomeName = 2,
+    primaryAnalysisId = 2,
+    addSecondary = FALSE,
+    topStretch = 2.5,
+    seconardAnalysisId = primaryAnalysisId,
+    outcomeIds = c(23,29,36,42),
+    outcomeNames = c("Diagnosis", "+Hospital", "PNA", "PAAS"),
+    outcomeColors = c(wes_palette("Moonrise3")[5],
+                       wes_palette("Moonrise2")[2],
+                       wes_palette("Moonrise3")[3],
+                       wes_palette("Moonrise2")[3]),
+    cohortNames = c("ACE/ARB vs CCB/THZ", "ACE vs CCB/THZ", "ARB vs CCB/THZ", "ACE vs ARB", "C5", "C6")
+    ) {
+
+  table <- table %>% filter(!is.na(rr))
+
+  table5 <- table %>%
+    filter(analysisId == primaryAnalysisId) %>%
+    mutate(point = pointStyle, size = pointSize) %>%
+    mutate(color = ifelse(!pass, poorBalance, "black")) %>%
+    mutate(balanceColor = ifelse(!pass, poorBalance, "black"))
+
+  table6 <- table %>%
+    left_join(design, by = "databaseId") %>%
+    filter(analysisId == seconardAnalysisId) %>%
+    mutate(point = 21,size = 0.6) %>%
+    mutate(color = ifelse(!pass, "white", "white")) %>%
+    mutate(balanceColor = ifelse(!pass, poorBalance, "black"))
+
+  delta5 <- 0
+  delta6 <- 0
+
+  if (addSecondary) {
+    delta5 <- +0.25
+    delta6 <- -0.25
+  }
+
+  if (png) {
+    png(fileName, height = pageHeight, width = pageWidth, units = "in", res = 300)
+  } else {
+    pdf(file = fileName, height = pageHeight, width = pageWidth)
+  }
+
+  layout <- table %>%
+    select(majorOrder, minorOrder, cumMajorSkip, databaseName) %>% distinct() %>%
+    arrange(majorOrder, minorOrder) %>%
+    mutate(index = row_number() - 1,
+           row = index + btwSkip * cumMajorSkip) %>%
+    select(-cumMajorSkip, -index) %>%
+    mutate(skips = ifelse(majorOrder - lag(majorOrder, default = 0) == 0, 0, 1))
+
+  ymax <- max(layout$row)
+
+  par(mar = c(1,1,1,1))
+
+  plot(0,0, type = "n",
+       ylim = c(-3, ymax),
+       xlim = c(0, 12), axes = FALSE,
+       ylab = "", xlab = "")
+
+  cohortPositions <- layout %>% filter(skips == 1) %>% pull(row) - 1
+
+  text(x = 0, y = ymax - cohortPositions, labels = cohortNames, pos = 4, cex = textCex)
+
+  # minorNames <- rep(c("Monotherapy", "+ Combination"), length(cohortNames))
+  # minorTicks <- tab %>% filter(databaseId == "SIDIAP") %>% select(row) %>% pull() - 1
+  # text(x = 0.25, y = ymax - minorTicks, labels = minorNames, pos = 4, cex = textCex)
+  #
+  text(x = 0.5, y = ymax - layout$row, labels = layout$databaseName, pos = 4, cex = textCex)
+
+  start <- 3.5
+  width <- 2
+  spacer <- 2.4
+  tick <- 0.1
+
+  scaleMin <- 1/4  # -1
+  scaleMax <- 4    # +1
+
+  # points(x = 4, y = ymax - 0.5, pch = 21, bg = "black")
+  # text(x = 4.025, y = ymax - 0.5, labels = "PS-stratified",
+  #      pos = 4, cex = textCex, adj = 0.5)
+  # 
+  # points(x = 6, y = ymax - 0.5, pch = 21, bg = "white")
+  # text(x = 6.025, y = ymax - 0.5, labels = "PS-matched",
+  #      pos = 4, cex = textCex, adj = 0.5)
+  # 
+  points(x = 10, y = ymax - 0.5, pch = 22, bg = poorBalance, col = poorBalance)
+  text(x = 10.025, y = ymax - 0.5, labels = "Fails study diagnostics",
+       pos = 4, cex = textCex, adj = 0.5)
+
+  scale <- function(x) {
+    log(x) / (log(scaleMax) - log(scaleMin)) * width
+  }
+
+  clip_min <- function(x) {
+    pmax(x, -width / 2)
+  }
+
+  clip_max <- function(x) {
+    pmin(x, +width / 2)
+  }
+
+  clip_rm <- function(x) {
+    x[x > width / 2] <- NA
+    x[x < -width / 2] <- NA
+    x
+  }
+
+  # library(wesanderson)
+
+  outcomeColors <- adjustcolor(outcomeColors, alpha.f = 0.2)
+
+  # designColors <- c(wes_palette("Moonrise2")[1],
+  #                   wes_palette("Moonrise2")[2])
+  # balancePointColor <- wes_palette("Moonrise2")[4]
+  # designColors <- adjustcolor(designColors, alpha.f = 0.2)
+
+  for (i in 1:3) {
+
+    offset <- start + (i - 1) * spacer
+
+    rect(xleft = offset + scale(scaleMin),
+         xright = offset + scale(scaleMax),
+         ytop = ymax - 1.5 + topStretch,
+         ybottom = -0.5,
+         col = outcomeColors[i], #"grey90",
+         border = NA)
+
+    segments(x0 = offset, x1 = offset,
+             y0 = -0.5, y1 = ymax - 2 + topStretch, lty = 3)
+
+    # Primary analysis
+
+    tab <- table5 %>% filter(outcomeId == outcomeIds[i]) %>%
+      inner_join(layout, by = c("majorOrder", "minorOrder"))
+
+    segments(x0 = offset + clip_min(scale(tab$calibratedCi95Lb)),
+             x1 = offset + clip_max(scale(tab$calibratedCi95Ub)),
+             y0 = ymax - tab$row + delta5, y1 = ymax - tab$row + delta5,
+             col = tab$balanceColor)
+
+    segments(x0 = offset + clip_rm(scale(tab$calibratedCi95Lb)),
+             x1 = offset + clip_rm(scale(tab$calibratedCi95Lb)),
+             y0 = ymax - tab$row + tick + delta5,
+             y1 = ymax - tab$row - tick + delta5,
+             col = tab$balanceColor)
+
+    segments(x0 = offset + clip_rm(scale(tab$calibratedCi95Ub)),
+             x1 = offset + clip_rm(scale(tab$calibratedCi95Ub)),
+             y0 = ymax - tab$row + tick + delta5,
+             y1 = ymax - tab$row - tick + delta5,
+             col = tab$balanceColor)
+
+    points(x = offset + clip_rm(scale(tab$calibratedRr)),
+           y = ymax - tab$row + delta5,
+           pch = tab$point,
+           bg = tab$color,
+           cex = tab$size,
+           col = tab$balanceColor)
+
+    if (addSecondary) {
+
+      # Secondary analysis
+
+      tab <- table6 %>% filter(outcomeId == outcomeIds[i]) %>%
+        inner_join(layout, by = c("majorOrder", "minorOrder"))
+
+      segments(x0 = offset + clip_min(scale(tab$calibratedCi95Lb)),
+               x1 = offset + clip_max(scale(tab$calibratedCi95Ub)),
+               y0 = ymax - tab$row + delta6, y1 = ymax - tab$row + delta6,
+               col = tab$balanceColor)
+
+      segments(x0 = offset + clip_rm(scale(tab$calibratedCi95Lb)),
+               x1 = offset + clip_rm(scale(tab$calibratedCi95Lb)),
+               y0 = ymax - tab$row + tick + delta6,
+               y1 = ymax - tab$row - tick + delta6,
+               col = tab$balanceColor)
+
+      segments(x0 = offset + clip_rm(scale(tab$calibratedCi95Ub)),
+               x1 = offset + clip_rm(scale(tab$calibratedCi95Ub)),
+               y0 = ymax - tab$row + tick + delta6,
+               y1 = ymax - tab$row - tick + delta6,
+               col = tab$balanceColor)
+
+      points(x = offset + clip_rm(scale(tab$calibratedRr)),
+             y = ymax - tab$row + delta6,
+             pch = tab$point,
+             bg = tab$color,
+             cex = tab$size,
+             col = tab$balanceColor)
+    }
+
+    # Bottom marks
+
+    bt <- -0.75
+
+    segments(x0 = offset - width / 2,
+             x1 = offset + width / 2,
+             y0 = bt, y1 = bt)
+
+    marks <- scale(c(1/4, 1/2, 1, 2, 4))
+    labels <- c("1/4", "1/2", "1", "2", "4")
+
+    segments(x0 = offset + marks,
+             x1 = offset + marks,
+             y0 = bt,
+             y1 = bt - 0.2)
+
+    text(x = offset + marks,
+         y = bt - 0.1,
+         labels = labels,
+         pos = 1, cex = textCex)
+
+    text(x = offset,
+         y = bt - shiftOutcomeName,
+         labels = outcomeNames[i],
+         cex = 0.8,
+         adj = c(0.5, 1))
+  }
+
+  invisible(dev.off())
+}
+```
+
+```{r effectEstimates, eval=TRUE, message=FALSE}
+connection <- DatabaseConnector::connect(connectionDetails)
+
+sql <- paste0("SET search_path TO ", schema, ";")
+DatabaseConnector::executeSql(connection = connection, sql = sql)
+
+cmResult <- DatabaseConnector::querySql(connection = connection,
+                                        sql = "SELECT * FROM cm_result",
+                                        snakeCaseToCamelCase = TRUE)
+
+cmDiagnostics <- DatabaseConnector::querySql(connection = connection,
+                                        sql = "SELECT * FROM cm_diagnostics_summary",
+                                        snakeCaseToCamelCase = TRUE)
+
+DatabaseConnector::disconnect(connection)
+
+subset <- cmResult %>%
+  filter(outcomeId %in% c(19023, 19024, 19059),           # All outcomes
+         targetId == 19137001, comparatorId == 19021001,  # GLP1RA vs DPP4I
+         analysisId == 1) %>%
+  inner_join(cmDiagnostics %>% 
+               select(databaseId, analysisId, targetId, comparatorId, outcomeId, unblind)) %>%
+  inner_join(databaseName %>% 
+               select(databaseId, shortDatabaseName) %>%
+               rename(databaseName = shortDatabaseName) %>%
+               mutate(minorOrder = row_number()))
+
+# Uses a custom function from the LEGEND-T2DM manuscript package   
+makePrettyFigure(subset %>% 
+                   mutate(majorOrder = 1,
+                          pass = unblind,
+                          cumMajorSkip = 0),
+                 fileName = "StrategusFigure2.pdf",
+                 primaryAnalysisId = 1,
+                 outcomeIds = c(19023, 19024, 19059),
+                 outcomeNames = c("AMI/inpat", "AMI/all", "Diarrhea"))
+```
+
+```{r, echo=FALSE, fig.cap="Custom plotting function reporting hazard ratio (HR) and 95% confidence interval estimates across data sources.  Note the beautiful `wesanderson` inspired colors."}
+makePrettyFigure(subset %>%
+                   mutate(majorOrder = 1,
+                          pass = unblind,
+                          cumMajorSkip = 0),
+                 fileName = "StrategusFigure1.png",
+                 png = TRUE,
+                 primaryAnalysisId = 1,
+                 outcomeIds = c(19023, 19024, 19059),
+                 outcomeNames = c("AMI/inpat", "AMI/all", "Diarrhea"))
+
+knitr::include_graphics("StrategusFigure1.png")
+```
+

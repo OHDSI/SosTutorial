@@ -9,3 +9,8 @@
 
 Credentials.R
 *.jar
+
+.DS_Store
+extras
+
+*Figure1.*
